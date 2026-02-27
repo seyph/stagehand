@@ -22,7 +22,6 @@ const StagehandConfig: V3Options = {
   browserbaseSessionCreateParams: {
     projectId: process.env.BROWSERBASE_PROJECT_ID!,
     browserSettings: {
-      advancedStealth: true,
       blockAds: true,
       solveCaptchas: true,
     },
