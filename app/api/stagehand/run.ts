@@ -5,24 +5,27 @@
  *
  * To edit the Stagehand script, see `api/stagehand/main.ts`.
  * To edit config, see `stagehand.config.ts`.
- *
- * In this quickstart, we'll be automating a browser session to show you the power of Stagehand.
  */
 "use server";
 
 import Browserbase from "@browserbasehq/sdk";
 import { Stagehand } from "@browserbasehq/stagehand";
 import StagehandConfig from "@/stagehand.config";
+import type { PdfBody } from "@/utils/pdfSchema";
 import { main } from "./main";
 
-export async function runStagehand(sessionId?: string) {
+export async function runStagehand(
+  body: PdfBody,
+  sessionId?: string,
+): Promise<{ pdfUrl: string }> {
   const stagehand = new Stagehand({
     ...StagehandConfig,
     browserbaseSessionID: sessionId,
   });
   await stagehand.init();
-  await main({ stagehand });
+  const result = await main({ stagehand, body });
   await stagehand.close();
+  return result;
 }
 
 export async function startBBSSession() {
@@ -42,7 +45,7 @@ export async function getConfig() {
     process.env.BROWSERBASE_API_KEY !== undefined &&
     process.env.BROWSERBASE_PROJECT_ID !== undefined;
 
-  const hasLLMCredentials = process.env.OPENAI_API_KEY !== undefined;
+  const hasLLMCredentials = process.env.OPENROUTER_API_KEY !== undefined;
 
   return {
     env: StagehandConfig.env,
