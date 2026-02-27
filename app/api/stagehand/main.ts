@@ -12,7 +12,7 @@
  * 4. Use Playwright to click the first link. If it fails, use `act` to gracefully fallback to Stagehand.
  */
 
-import { Stagehand } from "@browserbasehq/stagehand";
+import type { Stagehand } from "@browserbasehq/stagehand";
 import { chromium } from "playwright-core";
 import { z } from "zod/v3";
 
@@ -32,7 +32,7 @@ export async function main({
       `📍 Step 2: Stagehand will use AI to "extract" information about the quickstart`,
       `📍 Step 3: Stagehand will use AI to "observe" and identify links in the 'Guides' section`,
       `📍 Step 4: Stagehand will attempt to click the first link using Playwright, with "act" as an AI fallback`,
-    ].join("\n")
+    ].join("\n"),
   );
 
   const page = stagehand.context.pages()[0];
@@ -42,7 +42,7 @@ export async function main({
   const browser = await chromium.connectOverCDP({
     wsEndpoint: stagehand.connectURL(),
   });
-  
+
   const pwContext = browser.contexts()[0];
   const pwPage = pwContext.pages()[0];
 
@@ -54,13 +54,13 @@ export async function main({
       title: z.string(),
       link: z.string(),
       description: z.string(),
-    })
+    }),
   );
   announce(
     `The ${description.title} is at: ${description.link}` +
       `\n\n${description.description}` +
       `\n\n${JSON.stringify(description, null, 2)}`,
-    "Extract"
+    "Extract",
   );
 
   const observeResult = await stagehand.observe(
@@ -70,13 +70,11 @@ export async function main({
     `Observe: We can click:\n${observeResult
       .map((r) => `"${r.description}" -> ${r.selector}`)
       .join("\n")}`,
-    "Observe"
+    "Observe",
   );
 
   try {
-    throw new Error(
-      "Comment out this error to run the base Playwright code!"
-    );
+    // throw new Error("Comment out this error to run the base Playwright code!");
 
     // Wait for search button and click it
     const quickStartSelector = `#content-area > div.relative.mt-8.prose.prose-gray.dark\:prose-invert > div > a:nth-child(1)`;
@@ -84,20 +82,18 @@ export async function main({
     await pwPage.locator(quickStartSelector).click();
     await pwPage.waitForLoadState("networkidle");
     announce(
-      `Clicked the quickstart link using base Playwright code. Uncomment line 118 in index.ts to have Stagehand take over!`
+      `Clicked the quickstart link using base Playwright code. Uncomment line 118 in index.ts to have Stagehand take over!`,
     );
   } catch (e) {
     if (!(e instanceof Error)) {
       throw e;
     }
 
-    const actResult = await stagehand.act(
-      "Click the link to the quickstart",
-    );
+    const actResult = await stagehand.act("Click the link to the quickstart");
     announce(
       `Clicked the quickstart link using Stagehand AI fallback.` +
         `\n${actResult}`,
-      "Act"
+      "Act",
     );
   }
 
@@ -117,7 +113,7 @@ export async function main({
         .join("\n")}`,
       `---`,
       `4. We used Playwright to click the first link. If it failed, we used act to gracefully fallback to Stagehand.`,
-    ].join("\n\n")
+    ].join("\n\n"),
   );
 }
 

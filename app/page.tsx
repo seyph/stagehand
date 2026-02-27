@@ -1,14 +1,14 @@
 "use client";
 
+import type { V3Options } from "@browserbasehq/stagehand";
+import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import {
   getConfig,
   runStagehand,
   startBBSSession,
 } from "@/app/api/stagehand/run";
 import DebuggerIframe from "@/components/stagehand/debuggerIframe";
-import { V3Options } from "@browserbasehq/stagehand";
-import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
 
 export default function Home() {
   const [config, setConfig] = useState<V3Options | null>(null);
@@ -24,12 +24,12 @@ export default function Home() {
     const warningToShow: string[] = [];
     if (!config.hasLLMCredentials) {
       warningToShow.push(
-        "No LLM credentials found. Edit stagehand.config.ts to configure your LLM client."
+        "No LLM credentials found. Edit stagehand.config.ts to configure your LLM client.",
       );
     }
     if (!config.hasBrowserbaseCredentials) {
       warningToShow.push(
-        "No BROWSERBASE_API_KEY or BROWSERBASE_PROJECT_ID found. You will probably want this to run Stagehand in the cloud."
+        "No BROWSERBASE_API_KEY or BROWSERBASE_PROJECT_ID found. You will probably want this to run Stagehand in the cloud.",
       );
     }
     setWarning(warningToShow.join("\n"));
@@ -97,6 +97,7 @@ export default function Home() {
 
         <div className="flex gap-4 items-center flex-col sm:flex-row">
           {!running && (
+            // biome-ignore lint/a11y/useValidAnchor: <explanation>
             <a
               href="#"
               className=" border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 hover:bg-yellow-500"

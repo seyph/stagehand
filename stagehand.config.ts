@@ -1,7 +1,16 @@
-import type { V3Options, LogLine } from "@browserbasehq/stagehand";
+import {
+  AISdkClient,
+  type LogLine,
+  type V3Options,
+} from "@browserbasehq/stagehand";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const openRouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
 
 const StagehandConfig: V3Options = {
   env: "BROWSERBASE" /* Environment: "LOCAL" or "BROWSERBASE" */,
@@ -12,15 +21,26 @@ const StagehandConfig: V3Options = {
     undefined /* Session ID for resuming Browserbase sessions */,
   browserbaseSessionCreateParams: {
     projectId: process.env.BROWSERBASE_PROJECT_ID!,
+    browserSettings: {
+      advancedStealth: true,
+      blockAds: true,
+      solveCaptchas: true,
+    },
   } /* Parameters for creating Browserbase sessions */,
+  waitForCaptchaSolves: true /* Wait for captcha solves */,
   localBrowserLaunchOptions: {
     headless: false,
   } /* Options for local browser launch (headless, args, etc.) */,
-  model: {
-    modelName: "gpt-4o",
-    apiKey: process.env.OPENAI_API_KEY,
-  } /* Model configuration: can be string or object with modelName and apiKey */,
-  llmClient: undefined /* Optional: custom LLM client implementation */,
+  // model: {
+  //   modelName: "gpt-4o",
+  //   apiKey: process.env.OPENAI_API_KEY,
+  // } /* Model configuration: can be string or object with modelName and apiKey */,
+  model:
+    undefined /* Model configuration: can be string or object with modelName and apiKey */,
+  // llmClient: undefined /* Optional: custom LLM client implementation */,
+  llmClient: new AISdkClient({
+    model: openRouter("google/gemini-2.5-flash-lite"),
+  }) /* Optional: custom LLM client implementation */,
   systemPrompt: undefined /* Optional: system prompt for model */,
   logger: (message: LogLine) =>
     console.log(logLineToString(message)) /* Custom logging function */,
@@ -28,10 +48,15 @@ const StagehandConfig: V3Options = {
   selfHeal: undefined /* Enable self-healing for failed actions */,
   logInferenceToFile: false /* Log inference calls to file */,
   experimental: false /* Enable experimental features */,
-  disablePino: false /* Disable pino logging backend */,
+  disablePino:
+    process.env.NODE_ENV === "development"
+      ? false
+      : true /* Disable pino logging backend */,
   disableAPI: false /* Disable API functionality */,
-  cacheDir: undefined /* Directory for caching actions (enables caching when set) */,
+  cacheDir:
+    undefined /* Directory for caching actions (enables caching when set) */,
 };
+
 export default StagehandConfig;
 
 /**

@@ -10,9 +10,9 @@
  */
 "use server";
 
-import StagehandConfig from "@/stagehand.config";
 import Browserbase from "@browserbasehq/sdk";
 import { Stagehand } from "@browserbasehq/stagehand";
+import StagehandConfig from "@/stagehand.config";
 import { main } from "./main";
 
 export async function runStagehand(sessionId?: string) {
