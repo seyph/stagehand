@@ -13,9 +13,16 @@ const SelectorsSchema = z.object({
   remove: z.array(z.string()).optional(),
 });
 
+const ColorSchema = z.union([
+  z.literal("auto"),
+  z.literal("global"),
+  z.string().regex(/^#[0-9a-fA-F]{6}$/, "Invalid color (use #RRGGBB)"),
+]);
+
 const DocumentSchema = z.object({
   margin: SpacingSchema.optional(),
   padding: SpacingSchema.optional(),
+  color: ColorSchema.optional(),
 });
 
 const GeolocationSchema = z

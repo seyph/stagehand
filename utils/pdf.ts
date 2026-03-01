@@ -62,6 +62,8 @@ export type PageInput = {
   url: string;
   margin?: Spacing;
   padding?: Spacing;
+  /** Pre-resolved margin color override. When set, takes precedence over dominantColor. */
+  color?: RGB;
 };
 
 // ---------------------------------------------------------------------------
@@ -697,7 +699,10 @@ async function buildPdfPage(
   fontMono: PDFFont,
   input: PageInput,
 ): Promise<void> {
-  const { rawPdf, rect, dominantColor, url, margin, padding } = input;
+  const { rawPdf, rect, dominantColor, url, margin, padding, color } = input;
+
+  // color takes precedence when pre-resolved (global or explicit modes).
+  const effectiveMarginColor = color ?? dominantColor;
 
   const layout = computeLayout(rect, url, fontMono, margin, padding);
 
@@ -715,10 +720,10 @@ async function buildPdfPage(
   const page = pdfDoc.addPage([layout.pageWidth, layout.pageHeight]);
 
   // Choose text color (black or white) for maximum contrast on the margin color.
-  const textColor = contrastColor(dominantColor);
+  const textColor = contrastColor(effectiveMarginColor);
 
   // Layer drawing order: background → panel → content → banners → annotation.
-  drawMarginBackground(page, layout, dominantColor);
+  drawMarginBackground(page, layout, effectiveMarginColor);
   drawContentPanel(page, layout, embeddedPage, rect.backgroundColor);
   drawTopBanner(page, layout, fontRegular, textColor);
   drawBottomBlock(page, layout, fontMono, fontRegular, textColor);

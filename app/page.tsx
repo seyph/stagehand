@@ -14,7 +14,13 @@ import { type PdfBody, PdfBodySchema } from "@/utils/pdfSchema";
 // ---------- types ----------
 
 type Spacing = { top: string; right: string; bottom: string; left: string };
-type DocumentFields = { margin: Spacing; padding: Spacing };
+type ColorMode = "" | "auto" | "global" | "explicit";
+type DocumentFields = {
+  margin: Spacing;
+  padding: Spacing;
+  colorMode: ColorMode;
+  colorHex: string;
+};
 type SelectorFields = { main: string; wait: string; remove: string };
 type PageItem = { url: string; selectors: SelectorFields; document: DocumentFields };
 
@@ -42,6 +48,8 @@ const emptySelectors = (): SelectorFields => ({ main: "", wait: "", remove: "" }
 const emptyDocument = (): DocumentFields => ({
   margin: emptySpacing(),
   padding: emptySpacing(),
+  colorMode: "",
+  colorHex: "",
 });
 
 const defaultForm: FormState = {
@@ -50,6 +58,8 @@ const defaultForm: FormState = {
   document: {
     margin: { top: "16", right: "16", bottom: "16", left: "16" },
     padding: { top: "20", right: "20", bottom: "20", left: "20" },
+    colorMode: "auto",
+    colorHex: "",
   },
   items: [{ url: "", selectors: emptySelectors(), document: emptyDocument() }],
   geolocation: { country: "BR", state: "", city: "SAO_PAULO" },
@@ -95,6 +105,11 @@ function buildDocument(doc: DocumentFields) {
   const obj: Record<string, unknown> = {};
   if (hasSpacing(doc.margin)) obj.margin = toSpacing(doc.margin);
   if (hasSpacing(doc.padding)) obj.padding = toSpacing(doc.padding);
+  if (doc.colorMode === "auto") obj.color = "auto";
+  else if (doc.colorMode === "global") obj.color = "global";
+  else if (doc.colorMode === "explicit" && /^#[0-9a-fA-F]{6}$/.test(doc.colorHex))
+    obj.color = doc.colorHex;
+  // "" = inherit document setting, omit borderColor
   return Object.keys(obj).length ? obj : undefined;
 }
 
@@ -268,6 +283,8 @@ function DocumentSection({
   prefix,
   value,
   onChange,
+  onColor,
+  isItem = false,
 }: {
   prefix: string;
   value: DocumentFields;
@@ -276,6 +293,8 @@ function DocumentSection({
     field: keyof Spacing,
     val: string,
   ) => void;
+  onColor: (mode: ColorMode, hex: string) => void;
+  isItem?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -298,6 +317,42 @@ function DocumentSection({
           value={value.padding}
           onChange={(f, v) => onChange("padding", f, v)}
         />
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide opacity-50">
+          Border color
+        </span>
+        <select
+          id={`${prefix}-border-mode`}
+          className={inputCls}
+          value={value.colorMode}
+          onChange={(e) =>
+            onColor(e.target.value as ColorMode, value.colorHex)
+          }
+        >
+          {isItem && <option value="">— Inherit from document</option>}
+          <option value="auto">Auto (per page)</option>
+          <option value="global">Uniform (most frequent across pages)</option>
+          <option value="explicit">Custom color</option>
+        </select>
+        {value.colorMode === "explicit" && (
+          <div className="flex gap-2 items-center">
+            <input
+              type="color"
+              value={value.colorHex || "#888888"}
+              onChange={(e) => onColor("explicit", e.target.value)}
+              className="h-8 w-10 cursor-pointer border border-black/[.12] dark:border-white/[.15] bg-transparent p-0.5"
+            />
+            <input
+              type="text"
+              value={value.colorHex}
+              onChange={(e) => onColor("explicit", e.target.value)}
+              placeholder="#RRGGBB"
+              maxLength={7}
+              className={`${inputCls} w-28 font-mono`}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -369,6 +424,22 @@ export default function Home() {
         ...prev.document,
         [type]: { ...prev.document[type], [field]: value },
       },
+    }));
+
+  const updateGlobalColor = (mode: ColorMode, hex: string) =>
+    setForm((prev) => ({
+      ...prev,
+      document: { ...prev.document, colorMode: mode, colorHex: hex },
+    }));
+
+  const updateItemColor = (i: number, mode: ColorMode, hex: string) =>
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, idx) =>
+        idx === i
+          ? { ...item, document: { ...item.document, colorMode: mode, colorHex: hex } }
+          : item,
+      ),
     }));
 
   // page updaters
@@ -584,6 +655,7 @@ export default function Home() {
                   prefix="global"
                   value={form.document}
                   onChange={updateGlobalDocument}
+                  onColor={updateGlobalColor}
                 />
               </section>
 
@@ -787,6 +859,8 @@ export default function Home() {
                         onChange={(type, field, val) =>
                           updateItemDocument(i, type, field, val)
                         }
+                        onColor={(mode, hex) => updateItemColor(i, mode, hex)}
+                        isItem
                       />
                     </CollapsibleSection>
                   </div>
