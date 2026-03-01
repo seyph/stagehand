@@ -35,6 +35,7 @@ export async function main({
         remove: item.selectors?.remove ?? body.selectors?.remove ?? [],
         margin: item.document?.margin ?? body.document?.margin,
         padding: item.document?.padding ?? body.document?.padding,
+        acceptLanguage: body.acceptLanguage,
       };
 
       let lastError: unknown;

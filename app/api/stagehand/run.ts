@@ -28,11 +28,29 @@ export async function runStagehand(
   return result;
 }
 
-export async function startBBSSession() {
+export async function startBBSSession(geolocation?: {
+  country: string;
+  state?: string;
+  city?: string;
+}) {
   const browserbase = new Browserbase(StagehandConfig);
   const session = await browserbase.sessions.create({
     projectId: StagehandConfig.projectId!,
     ...StagehandConfig.browserbaseSessionCreateParams,
+    ...(geolocation
+      ? {
+          proxies: [
+            {
+              type: "browserbase",
+              geolocation: {
+                country: geolocation.country,
+                ...(geolocation.state ? { state: geolocation.state } : {}),
+                ...(geolocation.city ? { city: geolocation.city } : {}),
+              },
+            },
+          ],
+        }
+      : {}),
   });
   const debugUrl = await browserbase.sessions.debug(session.id);
   return {

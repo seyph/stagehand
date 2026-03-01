@@ -18,11 +18,16 @@ type DocumentFields = { margin: Spacing; padding: Spacing };
 type SelectorFields = { main: string; wait: string; remove: string };
 type PageItem = { url: string; selectors: SelectorFields; document: DocumentFields };
 
+type GeolocationFields = { country: string; state: string; city: string };
+type LanguageEntry = { code: string; weight: string };
+
 type FormState = {
   name: string;
   selectors: SelectorFields;
   document: DocumentFields;
   items: PageItem[];
+  geolocation: GeolocationFields;
+  acceptLanguage: LanguageEntry[];
 };
 
 // ---------- defaults ----------
@@ -47,6 +52,13 @@ const defaultForm: FormState = {
     padding: { top: "20", right: "20", bottom: "20", left: "20" },
   },
   items: [{ url: "", selectors: emptySelectors(), document: emptyDocument() }],
+  geolocation: { country: "BR", state: "", city: "SAO_PAULO" },
+  acceptLanguage: [
+    { code: "pt-BR", weight: "1" },
+    { code: "pt", weight: "0.8" },
+    { code: "en-US", weight: "0.5" },
+    { code: "en", weight: "0.3" },
+  ],
 };
 
 // ---------- body builder ----------
@@ -86,11 +98,36 @@ function buildDocument(doc: DocumentFields) {
   return Object.keys(obj).length ? obj : undefined;
 }
 
+function buildAcceptLanguage(entries: LanguageEntry[]): string | undefined {
+  const valid = entries.filter((e) => e.code.trim());
+  if (!valid.length) return undefined;
+  return valid
+    .map((e) => {
+      const code = e.code.trim();
+      const w = parseFloat(e.weight);
+      if (isNaN(w) || w >= 1) return code;
+      return `${code};q=${w}`;
+    })
+    .join(",");
+}
+
+function buildGeolocation(geo: GeolocationFields) {
+  if (!geo.country) return undefined;
+  const country = geo.country.toUpperCase();
+  return {
+    country,
+    state: geo.state && country === "US" ? geo.state.toUpperCase() : undefined,
+    city: geo.city ? geo.city.toUpperCase() : undefined,
+  };
+}
+
 function buildBody(form: FormState): unknown {
   return {
     name: form.name || undefined,
     selectors: buildSelectors(form.selectors),
     document: buildDocument(form.document),
+    geolocation: buildGeolocation(form.geolocation),
+    acceptLanguage: buildAcceptLanguage(form.acceptLanguage),
     items: form.items.map((item) => ({
       url: item.url,
       selectors: buildSelectors(item.selectors),
@@ -386,6 +423,26 @@ export default function Home() {
       ),
     }));
 
+  const addLanguage = () =>
+    setForm((prev) => ({
+      ...prev,
+      acceptLanguage: [...prev.acceptLanguage, { code: "", weight: "0.1" }],
+    }));
+
+  const removeLanguage = (i: number) =>
+    setForm((prev) => ({
+      ...prev,
+      acceptLanguage: prev.acceptLanguage.filter((_, idx) => idx !== i),
+    }));
+
+  const updateLanguage = (i: number, field: keyof LanguageEntry, value: string) =>
+    setForm((prev) => ({
+      ...prev,
+      acceptLanguage: prev.acceptLanguage.map((e, idx) =>
+        idx === i ? { ...e, [field]: value } : e,
+      ),
+    }));
+
   const resetForm = () => {
     setPdfUrl(null);
     setErrorMessage(null);
@@ -411,7 +468,7 @@ export default function Home() {
     try {
       let result: { pdfUrl: string };
       if (config.env === "BROWSERBASE") {
-        const { sessionId: newSessionId, debugUrl: newDebugUrl } = await startBBSSession();
+        const { sessionId: newSessionId, debugUrl: newDebugUrl } = await startBBSSession(data.geolocation);
         setDebugUrl(newDebugUrl);
         setSessionId(newSessionId);
         result = await runStagehand(data, newSessionId);
@@ -528,6 +585,143 @@ export default function Home() {
                   value={form.document}
                   onChange={updateGlobalDocument}
                 />
+              </section>
+
+              <section className="flex flex-col gap-4 border border-black/[.08] dark:border-white/[.1] p-4">
+                <h2 className="text-xs font-bold uppercase tracking-widest">
+                  browser
+                </h2>
+
+                {/* Geolocation */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide opacity-50">
+                    Geolocation
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field
+                      htmlFor="geo-country"
+                      label="Country"
+                      error={formErrors["geolocation.country"]}
+                    >
+                      <input
+                        id="geo-country"
+                        className={inputCls}
+                        placeholder="BR"
+                        maxLength={2}
+                        value={form.geolocation.country}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            geolocation: {
+                              ...prev.geolocation,
+                              country: e.target.value.toUpperCase(),
+                              state:
+                                e.target.value.toUpperCase() !== "US"
+                                  ? ""
+                                  : prev.geolocation.state,
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field
+                      htmlFor="geo-state"
+                      label="State (US only)"
+                      error={formErrors["geolocation.state"]}
+                    >
+                      <input
+                        id="geo-state"
+                        className={`${inputCls} ${form.geolocation.country.toUpperCase() !== "US" ? "opacity-30 cursor-not-allowed" : ""}`}
+                        placeholder="CA"
+                        maxLength={2}
+                        disabled={form.geolocation.country.toUpperCase() !== "US"}
+                        value={form.geolocation.state}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            geolocation: {
+                              ...prev.geolocation,
+                              state: e.target.value.toUpperCase(),
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field
+                      htmlFor="geo-city"
+                      label="City"
+                      error={formErrors["geolocation.city"]}
+                    >
+                      <input
+                        id="geo-city"
+                        className={inputCls}
+                        placeholder="SAO_PAULO"
+                        value={form.geolocation.city}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            geolocation: {
+                              ...prev.geolocation,
+                              city: e.target.value.toUpperCase(),
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                {/* Accept-Language */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide opacity-50">
+                    Accept-Language
+                  </span>
+                  <div className="flex flex-col gap-1">
+                    {form.acceptLanguage.map((entry, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: <explanation>
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          className={`${inputCls} flex-1`}
+                          placeholder="pt-BR"
+                          value={entry.code}
+                          onChange={(e) => updateLanguage(i, "code", e.target.value)}
+                        />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-xs opacity-40">q=</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.1}
+                            className={`${inputCls} w-16 text-center`}
+                            placeholder="1"
+                            value={entry.weight}
+                            onChange={(e) => updateLanguage(i, "weight", e.target.value)}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeLanguage(i)}
+                          className="px-2 py-2 text-sm opacity-40 hover:opacity-100 border border-black/[.08] dark:border-white/[.1] shrink-0"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addLanguage}
+                    className="text-xs border border-dashed border-black/[.2] dark:border-white/[.2] py-1.5 hover:border-yellow-500 hover:text-yellow-600 transition-colors"
+                  >
+                    + Add language
+                  </button>
+                  {buildAcceptLanguage(form.acceptLanguage) && (
+                    <p className="text-xs opacity-40 font-mono break-all">
+                      {buildAcceptLanguage(form.acceptLanguage)}
+                    </p>
+                  )}
+                </div>
               </section>
 
               {/* pages */}

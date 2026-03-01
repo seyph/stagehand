@@ -85,12 +85,16 @@ export type PageInput = {
 export async function setupPage(
   page: Page,
   url: string,
-  options: { selector: string; wait?: string[] },
+  options: { selector: string; wait?: string[]; acceptLanguage?: string },
 ): Promise<void> {
   // Impersonate a real macOS Chrome to avoid bot-detection on most sites.
   await page.setUserAgent(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   );
+
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": options.acceptLanguage ?? "pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3",
+  });
 
   // Full HD landscape viewport — ensures responsive breakpoints render at
   // desktop widths and avoids mobile-only layouts in the capture.
@@ -791,6 +795,7 @@ export type CaptureOptions = {
   remove: string[];
   margin?: Spacing;
   padding?: Spacing;
+  acceptLanguage?: string;
 };
 
 /**
@@ -808,10 +813,10 @@ export async function capturePageInput(
   url: string,
   options: CaptureOptions,
 ): Promise<PageInput> {
-  const { selector, wait, remove, margin, padding } = options;
+  const { selector, wait, remove, margin, padding, acceptLanguage } = options;
   const [page] = await browser.pages();
   try {
-    await setupPage(page, url, { selector, wait });
+    await setupPage(page, url, { selector, wait, acceptLanguage });
     await removeElements(page, remove);
 
     const rect = await isolateElement(page, selector);
