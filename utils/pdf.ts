@@ -11,6 +11,7 @@ import {
   StandardFonts,
 } from "pdf-lib";
 import type { Browser, Page } from "puppeteer-core";
+import sharp from "sharp";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,7 +96,8 @@ export async function setupPage(
   );
 
   await page.setExtraHTTPHeaders({
-    "Accept-Language": options.acceptLanguage ?? "pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3",
+    "Accept-Language":
+      options.acceptLanguage ?? "pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3",
   });
 
   // Full HD landscape viewport — ensures responsive breakpoints render at
@@ -804,6 +806,136 @@ export type CaptureOptions = {
 };
 
 /**
+ * Compresses all `<img>` elements within the selector to their displayed
+ * container dimensions, replacing their `src` with compressed data URLs.
+ *
+ * Images are never enlarged; only images whose natural size exceeds the
+ * displayed container are resized. Each format is preserved (JPEG→JPEG,
+ * PNG→PNG, WebP→WebP). GIF and SVG are skipped. On any per-image failure
+ * the original is left untouched.
+ */
+async function compressPageImages(page: Page, selector: string): Promise<void> {
+  type ImageInfo = {
+    src: string;
+    displayWidth: number;
+    displayHeight: number;
+    naturalWidth: number;
+    naturalHeight: number;
+  };
+
+  const imageInfos: ImageInfo[] = await page.evaluate((sel) => {
+    const container = document.querySelector(sel);
+    if (!container) return [];
+    return Array.from(container.querySelectorAll("img"))
+      .map((img) => {
+        const rect = img.getBoundingClientRect();
+        const src = img.currentSrc || img.src;
+        return {
+          src,
+          displayWidth: Math.ceil(rect.width),
+          displayHeight: Math.ceil(rect.height),
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+        };
+      })
+      .filter(
+        (info) =>
+          info.src &&
+          !info.src.startsWith("data:") &&
+          !info.src.startsWith("blob:") &&
+          info.naturalWidth > 0 &&
+          info.naturalHeight > 0 &&
+          info.displayWidth > 0 &&
+          info.displayHeight > 0,
+      );
+  }, selector);
+
+  if (imageInfos.length === 0) return;
+
+  const srcToDataUrl = new Map<string, string>();
+
+  for (const info of imageInfos) {
+    if (srcToDataUrl.has(info.src)) continue;
+
+    try {
+      const response = await fetch(info.src);
+      if (!response.ok) continue;
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("svg") || contentType.includes("gif")) continue;
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const pipeline = sharp(buffer);
+      const metadata = await pipeline.metadata();
+
+      const format = metadata.format;
+      if (!format) continue;
+      if (format === "gif" || format === "svg") continue;
+
+      const targetWidth = Math.min(info.naturalWidth, info.displayWidth);
+      const targetHeight = Math.min(info.naturalHeight, info.displayHeight);
+
+      const instance =
+        targetWidth < info.naturalWidth || targetHeight < info.naturalHeight
+          ? pipeline.resize(targetWidth, targetHeight, {
+              fit: "inside",
+              withoutEnlargement: true,
+            })
+          : pipeline;
+
+      let outputBuffer: Buffer;
+      let mimeType: string;
+
+      if (format === "jpeg") {
+        outputBuffer = await instance.jpeg({ quality: 75 }).toBuffer();
+        mimeType = "image/jpeg";
+      } else if (format === "png") {
+        outputBuffer = await instance
+          .png({ compressionLevel: 9, quality: 75 })
+          .toBuffer();
+        mimeType = "image/png";
+      } else if (format === "webp") {
+        outputBuffer = await instance.webp({ quality: 75 }).toBuffer();
+        mimeType = "image/webp";
+      } else if (format === "avif") {
+        outputBuffer = await instance.avif({ quality: 50 }).toBuffer();
+        mimeType = "image/avif";
+      } else {
+        // tiff, heif, etc. — convert to JPEG (broad browser/PDF support)
+        outputBuffer = await instance.jpeg({ quality: 75 }).toBuffer();
+        mimeType = "image/jpeg";
+      }
+
+      srcToDataUrl.set(
+        info.src,
+        `data:${mimeType};base64,${outputBuffer.toString("base64")}`,
+      );
+    } catch {
+      // Leave original image untouched if compression fails.
+    }
+  }
+
+  if (srcToDataUrl.size === 0) return;
+
+  await page.evaluate(
+    (sel, replacements) => {
+      const container = document.querySelector(sel);
+      if (!container) return;
+      for (const img of Array.from(container.querySelectorAll("img"))) {
+        const src = img.currentSrc || img.src;
+        const dataUrl = (replacements as Record<string, string>)[src];
+        if (dataUrl) {
+          img.src = dataUrl;
+          img.srcset = "";
+        }
+      }
+    },
+    selector,
+    Object.fromEntries(srcToDataUrl),
+  );
+}
+
+/**
  * Opens a new tab in `browser`, navigates to `url`, captures the target
  * element, and returns the assembled `PageInput`.
  *
@@ -842,6 +974,7 @@ export async function capturePageInput(
     );
 
     await fixGradientTransparency(page);
+    await compressPageImages(page, selector);
 
     const rawPdf = await page.pdf({
       width: `${rect.fullWidth}px`,
