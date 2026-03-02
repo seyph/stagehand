@@ -258,8 +258,119 @@ export async function fixGradientTransparency(page: Page): Promise<void> {
     const colorRe =
       /rgba?\(\s*(\d+)\s*[, ]\s*(\d+)\s*[, ]\s*(\d+)(?:\s*[,/]\s*[\d.]+)?\s*\)/g;
 
+    // Matches CSS Color 4 interpolation-space hints ("in oklab", "in oklch", …).
+    const COLOR_SPACE_RE =
+      /\s+in\s+(?:oklab|oklch|lab|lch|srgb-linear|display-p3|a98-rgb|prophoto-rgb|xyz(?:-d(?:50|65))?|hsl|hwb|srgb)\b/gi;
+
     const toRgba0 = (r: string, g: string, b: string) =>
       `rgba(${r}, ${g}, ${b}, 0)`;
+
+    /**
+     * Renders a linear-gradient() string onto a Canvas and returns a PNG data
+     * URL, or null if the gradient cannot be parsed.
+     *
+     * Why: Chrome converts CSS `background-image` gradients into PDF *shading
+     * patterns*. pdf.js (Firefox built-in viewer) does not support all shading
+     * pattern types and falls back to hotpink (#FF69B4) for any it cannot
+     * render. By rasterising the gradient to a PNG first, Chrome instead
+     * generates a PDF Image XObject, which pdf.js renders correctly.
+     */
+    function rasterize(gradStr: string, w: number, h: number): string | null {
+      const lm = gradStr.match(/^linear-gradient\(([\s\S]+)\)$/);
+      if (!lm) return null;
+
+      // Tokenise by top-level commas (skip commas inside rgba/rgb parens).
+      const raw = lm[1];
+      const tokens: string[] = [];
+      let depth = 0,
+        s = 0;
+      for (let i = 0; i < raw.length; i++) {
+        if (raw[i] === "(") depth++;
+        else if (raw[i] === ")") depth--;
+        else if (raw[i] === "," && depth === 0) {
+          tokens.push(raw.slice(s, i).trim());
+          s = i + 1;
+        }
+      }
+      tokens.push(raw.slice(s).trim());
+
+      // Detect direction token and derive canvas gradient endpoints.
+      // CSS angle convention: 0deg = to top, 90deg = to right, 180deg = to bottom.
+      let stopsFrom = 0;
+      let x0 = 0,
+        y0 = h / 2,
+        x1 = w,
+        y1 = h / 2; // default: 90deg
+
+      const angM = tokens[0].match(/^(-?\d+(?:\.\d+)?)deg$/);
+      const sideM = tokens[0].match(/^to\s+(top|bottom|left|right)\b/i);
+      if (angM || sideM) {
+        stopsFrom = 1;
+        let deg = 180;
+        if (angM) {
+          deg = parseFloat(angM[1]);
+        } else {
+          const d = sideM![1].toLowerCase();
+          if (d === "top") deg = 0;
+          else if (d === "right") deg = 90;
+          else if (d === "bottom") deg = 180;
+          else if (d === "left") deg = 270;
+        }
+        const rad = (deg * Math.PI) / 180;
+        const cx = w / 2,
+          cy = h / 2;
+        // Half-length of the gradient line for this bounding box (CSS spec §12.3).
+        const half =
+          Math.abs(Math.sin(rad)) * (w / 2) +
+          Math.abs(Math.cos(rad)) * (h / 2);
+        x0 = cx - Math.sin(rad) * half;
+        y0 = cy + Math.cos(rad) * half;
+        x1 = cx + Math.sin(rad) * half;
+        y1 = cy - Math.cos(rad) * half;
+      }
+
+      // Parse colour stops — after our normalisation step all stops are
+      // rgb() or rgba(), so named colours / hex are not needed here.
+      const stops: Array<{ color: string; pos: number | undefined }> = [];
+      for (const t of tokens.slice(stopsFrom)) {
+        const m = t.match(/^(rgba?\([^)]+\))\s*(\d+(?:\.\d+)?%)?$/);
+        if (!m) return null;
+        stops.push({
+          color: m[1],
+          pos: m[2] !== undefined ? parseFloat(m[2]) / 100 : undefined,
+        });
+      }
+      if (stops.length < 2) return null;
+
+      // Fill implicit positions per CSS gradient spec §12.4.
+      if (stops[0].pos === undefined) stops[0].pos = 0;
+      if (stops[stops.length - 1].pos === undefined)
+        stops[stops.length - 1].pos = 1;
+      let runStart = -1;
+      for (let i = 1; i < stops.length; i++) {
+        if (stops[i].pos === undefined && runStart < 0) runStart = i - 1;
+        if (stops[i].pos !== undefined && runStart >= 0) {
+          const p0 = stops[runStart].pos!;
+          const p1 = stops[i].pos!;
+          const n = i - runStart;
+          for (let k = 1; k < n; k++)
+            stops[runStart + k].pos = p0 + (p1 - p0) * (k / n);
+          runStart = -1;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(w, 1);
+      canvas.height = Math.max(h, 1);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+
+      const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+      for (const stop of stops) grad.addColorStop(stop.pos!, stop.color);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/png");
+    }
 
     const els = Array.from(document.querySelectorAll("*")) as HTMLElement[];
     for (const el of els) {
@@ -270,28 +381,35 @@ export async function fixGradientTransparency(page: Page): Promise<void> {
       if (!bg.includes("gradient") || !TRANSPARENT_RE.test(bg)) continue;
       TRANSPARENT_RE.lastIndex = 0;
 
-      // Collect all non-transparent color stops from the computed gradient.
+      // Collect all non-transparent colour stops from the computed gradient.
       const opaqueColors: Array<[string, string, string]> = [];
       colorRe.lastIndex = 0;
       let m = colorRe.exec(bg);
       while (m !== null) {
         const [full, r, g, b] = m;
-        if (!TRANSPARENT_RE.test(full)) {
-          opaqueColors.push([r, g, b]);
-        }
+        if (!TRANSPARENT_RE.test(full)) opaqueColors.push([r, g, b]);
         TRANSPARENT_RE.lastIndex = 0;
         m = colorRe.exec(bg);
       }
-
       if (opaqueColors.length === 0) continue;
 
-      // Replace every transparent stop with the first opaque color at alpha=0.
-      // For gradients with multiple stops, a more accurate approach would pair
-      // each transparent stop with its nearest neighbor, but using the first
-      // opaque color is sufficient for the common from-transparent pattern.
+      // Strip non-sRGB hints and replace transparent stops with the nearest
+      // opaque colour at alpha 0, so the canvas gradient interpolates
+      // within the correct hue range.
+      const bgNorm = bg.replace(COLOR_SPACE_RE, "");
       const [r, g, b] = opaqueColors[0];
-      const fixed = bg.replace(TRANSPARENT_RE, toRgba0(r, g, b));
-      el.style.backgroundImage = fixed;
+      const fixed = bgNorm.replace(TRANSPARENT_RE, toRgba0(r, g, b));
+
+      // Rasterise to PNG.  Falls back to a plain CSS fix if parsing fails
+      // (e.g. radial-gradient or multi-layer background).
+      const dataUrl = rasterize(fixed, el.offsetWidth || 1, el.offsetHeight || 1);
+      if (dataUrl) {
+        el.style.setProperty("background-image", `url("${dataUrl}")`, "important");
+        el.style.setProperty("background-size", "100% 100%", "important");
+        el.style.setProperty("background-repeat", "no-repeat", "important");
+      } else {
+        el.style.setProperty("background-image", fixed, "important");
+      }
     }
   });
 }
